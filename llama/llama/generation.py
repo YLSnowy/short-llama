@@ -133,18 +133,12 @@ class Llama:
             pos = self.model.layers[0].attention.latest_pos
             if pos > 10:
                 cache_k = self.model.layers[0].attention.cache_k[:bsz, :pos, :, :].float()
-                # cache_v = self.model.layers[0].attention.cache_v[:bsz, pos-10:pos, :, :].float()
-                # cache_k = cache_k.view(1, 1, bsz, 4096).cuda()
-                # cache_v = cache_k.view(cache_v.shape[0], 1, 10, -1).cuda()
-                # input = torch.cat((cache_k, cache_v), dim=1).float()
                 input = cache_k.float()
                 output = len_predictor(input)
-                # print(output.shape())
                 output = torch.argmax(output, dim=-1)  # (batchsize,) -> 0 short; 1 long
                 print(output)
                 assert(0) 
 
-                # print(type(output1[0]))
                 self.pred_len = output1
                 # break
                 # if all(torch.all(output1 == 0)):
@@ -177,6 +171,20 @@ class Llama:
         # thread = threading.Thread(target = self.length_predict, args=(bsz,len_predictor,))
         # thread.start()
 
+        # padding_tokens = prompt_tokens.copy()
+        # for i in range(bsz):
+        #     for j in range(len(padding_tokens[i]), 36):
+        #         padding_tokens[i].append(0)
+        #     if len(padding_tokens[i]) > 36:
+        #         padding_tokens[i] = padding_tokens[i][:36]
+        # print(len(padding_tokens[0]))
+        # padding_tokens = torch.tensor(padding_tokens).cuda()
+        # output = len_predictor(padding_tokens)
+        # output = torch.argmax(output, dim=-1)  # (batchsize,) -> 0 short; 1 long
+        # print(output)
+        # assert(0)
+
+
         min_prompt_len = min(len(t) for t in prompt_tokens)
         max_prompt_len = max(len(t) for t in prompt_tokens)
         assert max_prompt_len <= params.max_seq_len
@@ -200,16 +208,12 @@ class Llama:
         end_pos = []
         i = 0  # 上面三个变量用于统计结束时候的轮次
         flag = 1
-        
-        # torch.set_printoptions(threshold=10000)
-        # print(tokens)
+
         # tensor = torch.tensor([[552, 559, 6773, 1234, 2629, 29871, 29896,29900, 3838, 29889]])
         short_list = [[12148, 1234, 23359, 29889]]
         norm_list = [[12148, 1234, 6773, 29889]]
 
         start_time = time.time()
-        # print(prompt_tokens)
-
         if min_prompt_len == total_len:
             logits = self.model.forward(tokens, prev_pos, -1)
             token_logprobs = -F.cross_entropy(
@@ -218,75 +222,64 @@ class Llama:
                 reduction="none",
                 ignore_index=pad_id,
             )
-
+        
+        # print(prompt_tokens.shape)
+        # print(min_prompt_len)
         for cur_pos in range(min_prompt_len, total_len):
             cache_cur_pos =  prev_pos if flag else -1
             
-            # if cur_pos - max_prompt_len == 40:
-            if cur_pos == 80:
-                # print(self.model.layers[0].attention.cache_k)
-                # 这部分是串行调用长度预测函数的部分
-                cache_k = self.model.layers[31].attention.cache_k[:bsz, :cur_pos, :, :].float().cuda()
-                cache_k = cache_k.view(bsz, cache_k.shape[1], -1).cuda()
-                # print(cache_k.shape)
-                # cache_v = self.model.layers[0].attention.cache_v[:bsz, -10:, :, :].float()
-                # cache_k = cache_k.view(cache_k.shape[0], 1, 10, -1).cuda()
-                # cache_v = cache_k.view(cache_v.shape[0], 1, 10, -1).cuda()
-                # input = torch.cat((cache_k, cache_v), dim=1).float()
+            # # if cur_pos - max_prompt_len == 80:
+            # if cur_pos == 80:
+            #     # t1 = time.time()
+            #     cache_k = self.model.layers[31].attention.cache_k[:bsz, :cur_pos, :, :].float().cuda()
+            #     cache_k = cache_k.view(bsz, cache_k.shape[1], -1).cuda()
+            #     # input = torch.cat((cache_k, cache_v), dim=1).float()
 
-                output = len_predictor(cache_k)
-                # print(output)
-                output = torch.argmax(output, dim=-1)  # (batchsize,) -> 0 short; 1 long
-                # print(output)
-                # assert(0)
-                list = []
-                min_len = min(output)
-                for i in range(bsz):
-                    if output[i] > min_len:
-                        list += short_list
-                    else:
-                        list += norm_list
+            #     output = len_predictor(cache_k)
+            #     output = torch.argmax(output, dim=-1)  # (batchsize,) -> 0 short; 1 long
+            #     # print(output)
+            #     # assert(0)
+            #     all_same = len(set(output)) == 1
+            #     list = []
+            #     min_len = min(output)
+            #     if not all_same:
+            #         for i in range(bsz):
+            #             if output[i] > min_len:
+            #                 list += short_list
+            #             else:
+            #                 list += norm_list
 
-                # for i in range(bsz):
-                #     list += short_list
+            #         # for i in range(bsz):
+            #         #     list += short_list
 
-                tensor = torch.tensor(list).cuda()
-                # print(len(tensor))
-                # assert(0)
-                # print(tensor.shape)
-                # print(tokens[:, :min_prompt_len].shape)
+            #         tensor = torch.tensor(list).cuda()
 
-                tensor_tmp = []
-                
-                for sentence_id in range(bsz):
-                    tensor_tmp.append([])
-                    if len(prompt_tokens[sentence_id]) >= cur_pos:
-                        tensor_tmp[sentence_id] += prompt_tokens[sentence_id][:cur_pos - 4]
-                        tensor_tmp[sentence_id] += (tensor[sentence_id].tolist())
-                        tensor_tmp[sentence_id] += [518, 29914, 25580, 29962]
-                    else:
-                        tensor_tmp[sentence_id] += prompt_tokens[sentence_id][:-4]
-                        # for k in range(flag):
-                        tensor_tmp[sentence_id] += (tensor[sentence_id].tolist())
-                        tensor_tmp[sentence_id] += [518, 29914, 25580, 29962]
-                        tensor_tmp[sentence_id] += (tokens[sentence_id, len(prompt_tokens[sentence_id]):cur_pos].tolist())
+            #         tensor_tmp = []
+            #         for sentence_id in range(bsz):
+            #             tensor_tmp.append([])
+            #             if len(prompt_tokens[sentence_id]) >= cur_pos:
+            #                 tensor_tmp[sentence_id] += prompt_tokens[sentence_id][:cur_pos - 4]
+            #                 tensor_tmp[sentence_id] += (tensor[sentence_id].tolist())
+            #                 tensor_tmp[sentence_id] += [518, 29914, 25580, 29962]
+            #             else:
+            #                 tensor_tmp[sentence_id] += prompt_tokens[sentence_id][:-4]
+            #                 # for k in range(flag):
+            #                 tensor_tmp[sentence_id] += (tensor[sentence_id].tolist())
+            #                 tensor_tmp[sentence_id] += [518, 29914, 25580, 29962]
+            #                 tensor_tmp[sentence_id] += (tokens[sentence_id, len(prompt_tokens[sentence_id]):cur_pos].tolist())
+                        
+            #         tensor_tmp = torch.tensor(tensor_tmp).cuda()
+            #         # print(self.tokenizer.decode(tensor_tmp[:, :].tolist()))
                     
-                
-                # print(len(tensor_tmp))
-                # print(len(tensor_tmp[0]))
-                # print(len(tensor_tmp[1]))
+            #         logits = self.model.forward(tensor_tmp, 0, 1)
+            #     else:
+            #         logits = self.model.forward(tokens[:, prev_pos:cur_pos], prev_pos, -1)
 
-                # assert(0)
-                tensor_tmp = torch.tensor(tensor_tmp).cuda()
-                # tensor_tmp = torch.cat((prompt_tokens[:, :], tensor), dim=1)
-                # tensor_tmp = torch.cat((tensor_tmp, tokens[:, max_prompt_len:cur_pos]), dim=1)
-                # print(self.tokenizer.decode(tensor_tmp[:, :].tolist()))
-                
-                logits = self.model.forward(tensor_tmp, 0, 1)
-                # flag += 1
-                # self.end = True
-            else:
-                logits = self.model.forward(tokens[:, prev_pos:cur_pos], prev_pos, -1)
+            #     # flag += 1
+            #     # self.end = True
+            #     # t2 = time.time()
+            # else:
+            logits = self.model.forward(tokens[:, prev_pos:cur_pos], prev_pos, -1)
             
             if logprobs:
                 token_logprobs[:, prev_pos + 1 : cur_pos + 1] = -F.cross_entropy(
@@ -306,35 +299,23 @@ class Llama:
                 input_text_mask[:, cur_pos], tokens[:, cur_pos], next_token
             )
             tokens[:, cur_pos] = next_token
-            # print(next_token == self.tokenizer.eos_id)
-            # if cur_pos - min_prompt_len == 25:
-            #     print(self.tokenizer.decode(tokens[:, :cur_pos].tolist()))
             eos_reached |= (~input_text_mask[:, cur_pos]) & (
                 next_token == self.tokenizer.eos_id
             )
-            # if cur_pos - min_prompt_len >= 10:
-            #     print(eos_reached)
-            # print(len(eos_reached))
-            # if eos_reached[0] == True:
-            #     print("iteration count is ", cur_pos - min_prompt_len)
             prev_pos = cur_pos
-            # print(eos_reached)
-            # print(eos_reached[0][cur_pos - 148])
+            
             count = 0
             for j in range(len(eos_reached)):
                 if(eos_reached[j] == True):
                     count += 1
             if count > old_count:
                 old_count = count
-                # print(old_count)
-                # print(i)
                 end_pos.append(i)
             
             i += 1
             if all(eos_reached):
                 break
-        
-        # print(end_pos)
+
         if logprobs:
             token_logprobs = token_logprobs.tolist()
         out_tokens, out_logprobs = [], []
@@ -355,7 +336,7 @@ class Llama:
         
         end_time = time.time()
         print("running time(ms) = ", (end_time - start_time) * 1000)
-        with open("/home/snow/llama/llama/result/tri-llama-time.txt", "a") as file:
+        with open("/home/snow/llama/llama/result/alpaca-llama-base-time.txt", "a") as file:
             file.write('time = %f' % ((end_time - start_time) * 1000))
             file.write('\n')
         return (out_tokens, out_logprobs if logprobs else None)
@@ -471,7 +452,7 @@ class Llama:
             # print(self.tokenizer.decode(dialog_tokens))
             prompt_tokens.append(dialog_tokens)
 
-        # print(prompt_tokens) # 在这里开始变成了数字list
+        # print(prompt_tokens) # 在这里开始变成了数字list，每一个list的长度不一致
         generation_tokens, generation_logprobs = self.generate(
             len_predictor=len_predictor,
             prompt_tokens=prompt_tokens,
